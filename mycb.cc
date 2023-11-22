@@ -4,15 +4,27 @@
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Tooling/JSONCompilationDatabase.h>
 #include <clang/Tooling/Tooling.h>
+#include <filesystem>
 #include <iostream>
 #include <set>
+
+clang::SourceManager *SM = nullptr;
+std::filesystem::path ProjFolder;
 
 class IndexerVisitor
   : public clang::RecursiveASTVisitor<IndexerVisitor> {
 public:
   bool VisitFunctionDecl(clang::FunctionDecl *Declaration) {
     // Declaration->dump();
-    std::cerr << Declaration->getNameInfo().getName().getAsString() << std::endl;
+
+    // TODO: Use file ID rather than filename maybe
+    // auto FID = clang::FullSourceLoc(Declaration->getLocation(), *SM).getExpansionLoc().getFileID();
+    auto CurFilename = Declaration->getLocation().printToString(*SM);
+    if (CurFilename.rfind(std::filesystem::absolute(ProjFolder)) != 0) {
+      return true;
+    }
+
+    std::cerr << Declaration->getNameInfo().getName().getAsString() << " from " << Declaration->getLocation().printToString(*SM) << " is it " << std::endl;
     return true;
   }
 };
@@ -22,6 +34,7 @@ public:
   virtual void HandleTranslationUnit(clang::ASTContext &Context) {
     // Traversing the translation unit decl via a RecursiveASTVisitor
     // will visit all nodes in the AST.
+    SM = &Context.getSourceManager();
     Visitor.TraverseDecl(Context.getTranslationUnitDecl());
   }
 private:
@@ -44,9 +57,9 @@ int main(int argc, char **argv) {
     std::cerr << "Usage: " << argv[0] << " <project_folder>" << std::endl;
     return 1;
   }
-
+  ProjFolder = argv[1];
   auto Comp = std::unique_ptr<clang::tooling::CompilationDatabase>(
-      clang::tooling::CompilationDatabase::loadFromDirectory(argv[1],
+      clang::tooling::CompilationDatabase::loadFromDirectory(ProjFolder.c_str(),
                                                              ErrorMessage));
   if (!Comp) {
     std::cerr << ErrorMessage;
