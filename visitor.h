@@ -69,7 +69,7 @@ public:
     IndexerDB->registerFile(FID, &Context.getSourceManager());
     Visitor.TraverseDecl(Context.getTranslationUnitDecl());
 
-    // IndexerDB->generateHTML(Context.getSourceManager().getMainFileID());
+    IndexerDB->generateHTML(Context.getSourceManager().getMainFileID());
   }
 private:
   Indexer* IndexerDB;

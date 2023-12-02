@@ -4,6 +4,8 @@
 #include <set>
 #include <string>
 
+#include "common.h"
+
 class Indexer {
 public:
   Indexer(std::string ProjectFolder) : ProjectFolder(ProjectFolder) { }
