@@ -14,15 +14,10 @@ class IndexerVisitor
   : public clang::RecursiveASTVisitor<IndexerVisitor> {
 public:
   bool VisitFunctionDecl(clang::FunctionDecl *Decl) {
-    // TODO: Reimplement this and fix me properly, thanks :)
-    // auto FID = clang::FullSourceLoc(Decl->getLocation(), *SM).getExpansionLoc().getFileID();
-    // if (IndexerDB->shouldIgnore(FID)) {
-    //   return true;
-    // }
-    // auto CurFilename = Decl->getLocation().printToString(*SM);
-    // if (CurFilename.rfind(std::filesystem::absolute(ProjFolder)) != 0) {
-    //   return true;
-    // }
+    if (IndexerDB->shouldIgnore(Decl)) {
+      // TODO: Should it be false?
+      return true;
+    }
 
     // std::cerr << Decl->getNameInfo().getName().getAsString() << " from " << Decl->getLocation().printToString(*SM) << " is it " << std::endl;
     std::cerr << Decl->getNameInfo().getName().getAsString() << " is it " << std::endl;
@@ -30,11 +25,10 @@ public:
   }
 
   bool VisitVarDecl(clang::VarDecl *Decl) {
-    // TODO: Better mechanism and fix me
-    // auto CurFilename = Decl->getLocation().printToString(*SM);
-    // if (CurFilename.rfind(std::filesystem::absolute(ProjFolder)) != 0) {
-    //   return true;
-    // }
+    if (IndexerDB->shouldIgnore(Decl)) {
+      // TODO: Should it be false?
+      return true;
+    }
 
     std::cerr << Decl->getDeclName().getAsString() << std::endl;
     return true;
@@ -69,6 +63,10 @@ public:
       std::cerr << "Skipping file " << CurFilename.begin() << " as it is not in the project folder" << std::endl;
       return;
     }
+
+    // TODO: This is wrong, FID and SM will reset for each TU thus the database
+    // should be per TU or store files in a different fashion
+    IndexerDB->registerFile(FID, &Context.getSourceManager());
     Visitor.TraverseDecl(Context.getTranslationUnitDecl());
 
     // IndexerDB->generateHTML(Context.getSourceManager().getMainFileID());
