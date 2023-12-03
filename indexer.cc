@@ -22,8 +22,6 @@ bool Indexer::shouldIgnore(clang::Decl* Decl) {
 void Indexer::generateHTML(clang::FileID FID) {
   std::string OutputFolder = "./out";
 
-
-
   const clang::FileEntry *FE = SM->getFileEntryForID(FID);
   auto Filename = FE->getName();
   ASSERT(Filename.starts_with(ProjectFolder));
@@ -44,7 +42,29 @@ void Indexer::generateHTML(clang::FileID FID) {
   auto FileContent = SM->getBufferData(FID);
 
   OutputFile << "<html><pre>";
-  OutputFile << FileContent.bytes_begin();
+
+  const unsigned char* C = FileContent.bytes_begin();
+  int Line = 0;
+  int Column = 0;
+  while (*C) {
+
+    // Handle HTML Entities
+    if (*C == '<') {
+      OutputFile << "&lt;";
+    } else if (*C == '>') {
+      OutputFile << "&gt;";
+    } else {
+      OutputFile << *C;
+    }
+
+    if (*C == '\n') {
+      Line++;
+      Column = 0;
+    }
+    C++;
+    Column++;
+  }
+
   OutputFile << "</pre></html>";
   OutputFile.close();
 }
