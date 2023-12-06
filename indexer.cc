@@ -1,6 +1,7 @@
 #include "indexer.h"
 #include <clang/Basic/SourceManager.h>
 #include <fstream>
+#include <filesystem>
 
 void Indexer::registerFile(clang::FileID FID, clang::SourceManager* SM) {
   RegisteredFiles.emplace(FID);
@@ -10,8 +11,15 @@ void Indexer::registerFile(clang::FileID FID, clang::SourceManager* SM) {
 void Indexer::addFunctionDecl(clang::FunctionDecl *Decl) {
   // auto PLocBegin = SM->getPresumedLoc(Decl->getSourceRange().getBegin());
   // auto PLocEnd = SM->getPresumedLoc(Decl->getSourceRange().getEnd());
-  // Symbols.emplace_back(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Function, (uint32_t) Functions.size()});
-  // Functions.emplace_back(Decl);
+
+  auto PLocBegin = SM->getPresumedLoc(Decl->getNameInfo().getBeginLoc());
+  auto PLocEnd = SM->getPresumedLoc(Decl->getNameInfo().getEndLoc());
+
+  Symbols.emplace(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Function, (uint32_t) Functions.size()});
+  Functions.emplace_back(Decl);
+
+  DBG("Added function for " << PLocBegin.getLine() << "," << PLocBegin.getColumn() << " to " << PLocEnd.getLine() << "," << PLocEnd.getColumn());
+  DBG("   " << Decl->getNameInfo().getName().getAsString());
 }
 
 void Indexer::addReference(clang::DeclRefExpr *Expr) {
@@ -42,7 +50,8 @@ bool Indexer::shouldIgnore(clang::Stmt* Stmt) {
 }
 
 void Indexer::generateHTML(clang::FileID FID) {
-  std::string OutputFolder = "./out";
+  std::filesystem::path OutFolder = "./out";
+  std::string OutputFolder = std::filesystem::absolute(OutFolder);
 
   const clang::FileEntry *FE = SM->getFileEntryForID(FID);
   auto Filename = FE->getName();
@@ -63,7 +72,7 @@ void Indexer::generateHTML(clang::FileID FID) {
 
   auto FileContent = SM->getBufferData(FID);
 
-  OutputFile << "<html><pre>";
+  OutputFile << "<html><style>.func:target { background-color: yellow; }</style><pre>";
 
   const unsigned char* C = FileContent.bytes_begin();
   int Line = 1;
@@ -78,26 +87,37 @@ void Indexer::generateHTML(clang::FileID FID) {
       DBG("Symbol ok " << Line << "," << Column);
       if (CurSymbol->BColumn == Column) {
         WritingSymbol = true;
-        std::string SymName;
         if (CurSymbol->Type == SymType::Function) {
           auto *Func = Functions[CurSymbol->Idx];
-          SymName = Func->getNameAsString();
+          std::string FuncName = Func->getNameAsString();
+          OutputFile << "<span class=\"func\" id=\"" << FuncName << "\">";
         } else if (CurSymbol->Type == SymType::Reference) {
           auto *Ref = References[CurSymbol->Idx];
-          SymName = Ref->getNameInfo().getAsString();
+          auto FileName = clang::FullSourceLoc(Ref->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
+          auto RelativeFilename = FileName.substr(ProjectFolder.length());
+          std::string OutputFilename = OutputFolder + "/" + RelativeFilename.str() + ".html";
+
+          std::string SymName = Ref->getNameInfo().getAsString();
+          OutputFile << "<a href=\"" << OutputFilename << "#" << SymName << "\">";
         } else {
           ASSERT(false && "Not handled");
         }
-        OutputFile << "<a href=\"#" << SymName << "\">";
       }
     }
 
     // Stop the symbol writing on the next word as it seems
     // the location for symbol end is not properly computed
+    // XXX(1): Verify if we cannot fix the location/have something more accurate
     if (WritingSymbol) {
       if (*C == '.' || *C == '-' || *C == '\t' || *C == ' ' || *C == '('
           || *C == ';') {
-        OutputFile << "</a>";
+        if (CurSymbol->Type == SymType::Function) {
+          OutputFile << "</span>";
+        } else if (CurSymbol->Type == SymType::Reference) {
+          OutputFile << "</a>";
+        } else {
+          ASSERT(false && "Not handled");
+        }
         WritingSymbol = false;
         CurSymbol++;
         DBG("Next symbol: " << CurSymbol->BLine << "," << CurSymbol->BColumn);
@@ -113,6 +133,7 @@ void Indexer::generateHTML(clang::FileID FID) {
       OutputFile << *C;
     }
 
+    /// XXX: Cf XXX(1)
     // if (WritingSymbol && CurSymbol->ELine == Line) {
     //   DBG("Symbol end? " << Line << "," << Column);
     //   if (CurSymbol->EColumn == Column) {
