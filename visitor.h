@@ -15,22 +15,30 @@ class IndexerVisitor
 public:
   bool VisitFunctionDecl(clang::FunctionDecl *Decl) {
     if (IndexerDB->shouldIgnore(Decl)) {
-      // TODO: Should it be false?
+      // TODO: For performance purposes, we may want
+      // to return false
       return true;
     }
-
-    // std::cerr << Decl->getNameInfo().getName().getAsString() << " from " << Decl->getLocation().printToString(*SM) << " is it " << std::endl;
-    std::cerr << Decl->getNameInfo().getName().getAsString() << " is it " << std::endl;
+    IndexerDB->addFunctionDecl(Decl);
     return true;
   }
 
   bool VisitVarDecl(clang::VarDecl *Decl) {
     if (IndexerDB->shouldIgnore(Decl)) {
-      // TODO: Should it be false?
+      // TODO: For performance purposes, we may want
+      // to return false
       return true;
     }
+    return true;
+  }
 
-    std::cerr << Decl->getDeclName().getAsString() << std::endl;
+  bool VisitDeclRefExpr(clang::DeclRefExpr *Expr) {
+    if (IndexerDB->shouldIgnore(Expr)) {
+      // TODO: For performance purposes, we may want
+      // to return false
+      return true;
+    }
+    IndexerDB->addReference(Expr);
     return true;
   }
 
