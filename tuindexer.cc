@@ -157,13 +157,23 @@ void TUIndexer::generateHTML() {
 }
 
 void TUIndexer::dumpToDisk() {
+  // To be honest I have no clue if this will give any satisfying
+  // result but let's try
+  std::string RefsFilename = "/tmp/refs.sql";
   std::ofstream OutputFile;
-  OutputFile.open("/tmp/refs.dat", std::ios_base::app);
+  if (!std::filesystem::exists(RefsFilename)) {
+    OutputFile.open(RefsFilename);
+    OutputFile << "CREATE TABLE refs(STRING filename);\n";
+    OutputFile << "\n";
+  } else {
+    OutputFile.open(RefsFilename, std::ios_base::app);
+  }
+
   for (auto *Ref : References) {
     auto FileName = clang::FullSourceLoc(Ref->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
-    OutputFile << "(";
+    OutputFile << "INSERT INTO refs VALUES (";
     OutputFile << "\"" << FileName.begin() << "\"";
-    OutputFile << "),";
+    OutputFile << ");\n";
   }
   OutputFile.close();
 }
