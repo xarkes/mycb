@@ -41,6 +41,10 @@ public:
   bool shouldIgnore(clang::FileID FID);
 
   void generateHTML(clang::FileID FID);
+  // void generateDB();
+  void dumpToDisk(clang::FileID FID);
+
+  void clear() { Functions.clear(); References.clear(); Symbols.clear(); }
 
 private:
   std::set<clang::FileID> RegisteredFiles;

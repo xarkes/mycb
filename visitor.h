@@ -77,7 +77,16 @@ public:
     IndexerDB->registerFile(FID, &Context.getSourceManager());
     Visitor.TraverseDecl(Context.getTranslationUnitDecl());
 
-    IndexerDB->generateHTML(Context.getSourceManager().getMainFileID());
+    IndexerDB->generateHTML(FID);
+    IndexerDB->dumpToDisk(FID);
+
+    // TODO: That's very shitty
+    // TODO: Rename Indexer to TUIndexer and store the Source Manager there
+    // And add a "parent class" that will handle the whole thing
+    // And basically we should just parse and append stuff for each file we compile
+    // Let's see how it goes and performs in regard to having a DB that we can
+    // query for references and such.
+    IndexerDB->clear();
   }
 private:
   Indexer* IndexerDB;

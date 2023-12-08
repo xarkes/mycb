@@ -160,3 +160,42 @@ void Indexer::generateHTML(clang::FileID FID) {
   OutputFile << "</pre></html>";
   OutputFile.close();
 }
+
+void Indexer::dumpToDisk(clang::FileID FID) {
+  std::ofstream OutputFile;
+  OutputFile.open("/tmp/refs.dat", std::ios_base::app);
+  for (auto *Ref : References) {
+    auto FileName = clang::FullSourceLoc(Ref->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
+    OutputFile << "(";
+    OutputFile << "\"" << FileName.begin() << "\"";
+    OutputFile << "),";
+  }
+  OutputFile.close();
+}
+
+// This cannot work as we will use stuff that has been freed
+// We need to save on disk as we grow
+// void Indexer::generateDB() {
+//   std::ofstream OutputFile;
+//   OutputFile.open("/tmp/db.sql");
+
+//   OutputFile << "CREATE TABLE refs(STRING filename)\n";
+//   OutputFile << "\n";
+
+//   OutputFile << "INSERT INTO refs VALUES ";
+//   bool First = true;
+//   for (auto *Ref : References) {
+//     auto FileName = clang::FullSourceLoc(Ref->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
+//     if (!First) {
+//       OutputFile << ", ";
+//     }
+
+//     OutputFile << "(";
+//     OutputFile << "\"" << FileName.begin() << "\"";
+//     OutputFile << ")";
+//     First = false;
+//   }
+//   OutputFile << ";\n";
+
+//   OutputFile.close();
+// }
