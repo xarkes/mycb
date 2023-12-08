@@ -9,88 +9,28 @@
 #include <iostream>
 
 #include "indexer.h"
+#include "tuindexer.h"
 
 class IndexerVisitor
   : public clang::RecursiveASTVisitor<IndexerVisitor> {
 public:
-  bool VisitFunctionDecl(clang::FunctionDecl *Decl) {
-    if (IndexerDB->shouldIgnore(Decl)) {
-      // TODO: For performance purposes, we may want
-      // to return false
-      return true;
-    }
-    IndexerDB->addFunctionDecl(Decl);
-    return true;
-  }
-
-  bool VisitVarDecl(clang::VarDecl *Decl) {
-    if (IndexerDB->shouldIgnore(Decl)) {
-      // TODO: For performance purposes, we may want
-      // to return false
-      return true;
-    }
-    return true;
-  }
-
-  bool VisitDeclRefExpr(clang::DeclRefExpr *Expr) {
-    if (IndexerDB->shouldIgnore(Expr)) {
-      // TODO: For performance purposes, we may want
-      // to return false
-      return true;
-    }
-    IndexerDB->addReference(Expr);
-    return true;
-  }
-
-  void setIndexer(Indexer* IndexerDB) {
-    this->IndexerDB = IndexerDB;
+  bool VisitFunctionDecl(clang::FunctionDecl *Decl);
+  bool VisitVarDecl(clang::VarDecl *Decl);
+  bool VisitDeclRefExpr(clang::DeclRefExpr *Expr);
+  void setIndexer(TUIndexer* TUI) {
+    this->TUI = TUI;
   }
 
 private:
-  Indexer* IndexerDB;
-  // clang::SourceManager* SM;
+  TUIndexer* TUI;
 };
 
 class IndexerConsumer : public clang::ASTConsumer {
 public:
-  IndexerConsumer(Indexer* IndexerDB) : IndexerDB(IndexerDB) {
-    Visitor.setIndexer(IndexerDB);
-  }
-  virtual void HandleTranslationUnit(clang::ASTContext &Context) {
-    // Traversing the translation unit decl via a RecursiveASTVisitor
-    // will visit all nodes in the AST.
-    // auto CurFilename = Context.getSourceManager().getFilename()
-    auto &SM = Context.getSourceManager();
-
-    auto FID = SM.getMainFileID();
-    const clang::FileEntry *FE = SM.getFileEntryForID(FID);
-    auto CurFilename = FE->getName();
-    // std::cerr << "FID: " << Context.getSourceManager().getMainFileID().getHashValue() << std::endl;
-    // std::cerr << "Filename: " << CurFilename.begin() << std::endl;
-    if (CurFilename.rfind(IndexerDB->getProjectFolder()) != 0) {
-      std::cerr << "Skipping file " << CurFilename.begin() << " as it is not in the project folder" << std::endl;
-      return;
-    }
-
-    // TODO: This is wrong, FID and SM will reset for each TU thus the database
-    // should be per TU or store files in a different fashion
-    IndexerDB->registerFile(FID, &Context.getSourceManager());
-    Visitor.TraverseDecl(Context.getTranslationUnitDecl());
-
-    IndexerDB->generateHTML(FID);
-    IndexerDB->dumpToDisk(FID);
-
-    // TODO: That's very shitty
-    // TODO: Rename Indexer to TUIndexer and store the Source Manager there
-    // And add a "parent class" that will handle the whole thing
-    // And basically we should just parse and append stuff for each file we compile
-    // Let's see how it goes and performs in regard to having a DB that we can
-    // query for references and such.
-    IndexerDB->clear();
-  }
+  IndexerConsumer(Indexer* IndexerDB) : IndexerDB(IndexerDB) { }
+  virtual void HandleTranslationUnit(clang::ASTContext &Context);
 private:
   Indexer* IndexerDB;
-  // A RecursiveASTVisitor implementation.
   IndexerVisitor Visitor;
 };
 
