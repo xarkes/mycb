@@ -3,28 +3,67 @@
 #include <filesystem>
 #include <fstream>
 
-void TUIndexer::addFunctionDecl(clang::FunctionDecl *Decl) {
-  // auto PLocBegin = SM->getPresumedLoc(Decl->getSourceRange().getBegin());
-  // auto PLocEnd = SM->getPresumedLoc(Decl->getSourceRange().getEnd());
+std::ostream &operator<<(std::ostream &OS, const Symbol &S) {
+  return OS << "(" << S.BLine << "," << S.BColumn << ") -> (" <<
+    S.ELine << ", " << S.EColumn << ") (" <<
+    S.Type << ", " << S.Idx << ")";
+}
 
+std::string formatDeclName(clang::Decl* Decl) {
+  return std::to_string(Decl->getLocation().getHashValue());
+}
+
+std::string formatRefName(clang::Expr *Expr) {
+  if (clang::isa<clang::DeclRefExpr>(*Expr)) {
+    auto *DRef = static_cast<clang::DeclRefExpr*>(Expr);
+    return std::to_string(DRef->getFoundDecl()->getLocation().getHashValue());
+  }
+  ASSERT("Not handled");
+  return "";
+}
+
+void TUIndexer::addFunctionDecl(clang::FunctionDecl *Decl) {
   auto PLocBegin = SM->getPresumedLoc(Decl->getNameInfo().getBeginLoc());
   auto PLocEnd = SM->getPresumedLoc(Decl->getNameInfo().getEndLoc());
 
-  Symbols.emplace(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Function, (uint32_t) Functions.size()});
-  Functions.emplace_back(Decl);
+  Symbols.emplace(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Function, (uint32_t) Declarations.size()});
+  auto RefName = formatDeclName((clang::Decl*) Decl);
+  Declarations.emplace_back(SymDecl{RefName});
+}
 
-  DBG("Added function for " << PLocBegin.getLine() << "," << PLocBegin.getColumn() << " to " << PLocEnd.getLine() << "," << PLocEnd.getColumn());
-  DBG("   " << Decl->getNameInfo().getName().getAsString());
+void TUIndexer::addVarDecl(clang::VarDecl *Decl) {
+  auto PLocBegin = SM->getPresumedLoc(Decl->getLocation());
+  auto PLocEnd = SM->getPresumedLoc(Decl->getSourceRange().getEnd());
+
+  Symbols.emplace(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Function, (uint32_t) Declarations.size()});
+  auto RefName = formatDeclName((clang::Decl*) Decl);
+  Declarations.emplace_back(SymDecl{RefName});
 }
 
 void TUIndexer::addReference(clang::DeclRefExpr *Expr) {
   auto PLocBegin = SM->getPresumedLoc(Expr->getSourceRange().getBegin());
   auto PLocEnd = SM->getPresumedLoc(Expr->getSourceRange().getEnd());
   Symbols.emplace(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Reference, (uint32_t) References.size()});
-  References.emplace_back(Expr);
 
-  DBG("Added for " << PLocBegin.getLine() << "," << PLocBegin.getColumn() << " to " << PLocEnd.getLine() << "," << PLocEnd.getColumn());
-  DBG("   " << Expr->getNameInfo().getName().getAsString());
+  auto FileName = clang::FullSourceLoc(Expr->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
+  auto RelativeFilename = FileName.substr(IDB->getProjectFolder().length());
+
+  auto Name = formatRefName((clang::Expr*) Expr);
+  DBG("DeclRefExpr " << Name << ", " << std::string(RelativeFilename) << " at " << PLocBegin.getLine() << ", " << PLocBegin.getColumn());
+  References.emplace_back(SymRef{Name, std::string(RelativeFilename)});
+}
+
+void TUIndexer::addReference(clang::MemberExpr *Expr) {
+  auto PLocBegin = SM->getPresumedLoc(Expr->getMemberLoc());
+  auto PLocEnd = SM->getPresumedLoc(Expr->getMemberLoc());
+  Symbols.emplace(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Reference, (uint32_t) References.size()});
+
+  auto FileName = clang::FullSourceLoc(Expr->getMemberDecl()->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
+  auto RelativeFilename = FileName.substr(IDB->getProjectFolder().length());
+
+  auto Name = formatRefName((clang::Expr*) Expr);
+  DBG("MemberExpr " << Name << ", " << std::string(RelativeFilename) << " at " << PLocBegin.getLine() << ", " << PLocBegin.getColumn());
+  References.emplace_back(SymRef{Name, std::string(RelativeFilename)});
 }
 
 bool TUIndexer::shouldIgnore(clang::FileID FID) {
@@ -66,8 +105,7 @@ void TUIndexer::generateHTML() {
   OutputFile.open(OutputFilename);
 
   auto FileContent = SM->getBufferData(FID);
-
-  OutputFile << "<html><style>.func:target { background-color: yellow; }</style><pre>";
+  OutputFile << "<html><head><link rel=\"stylesheet\" href=\"res/style.css\"></head><body><pre>";
 
   const unsigned char* C = FileContent.bytes_begin();
   int Line = 1;
@@ -75,25 +113,21 @@ void TUIndexer::generateHTML() {
 
   auto CurSymbol = Symbols.begin();
   bool WritingSymbol = false;
-  DBG("Next symbol: " << CurSymbol->BLine << "," << CurSymbol->BColumn);
 
   while (*C) {
     if (!WritingSymbol && CurSymbol != Symbols.end() && CurSymbol->BLine == Line) {
-      DBG("Symbol ok " << Line << "," << Column);
       if (CurSymbol->BColumn == Column) {
         WritingSymbol = true;
         if (CurSymbol->Type == SymType::Function) {
-          auto *Func = Functions[CurSymbol->Idx];
-          std::string FuncName = Func->getNameAsString();
-          OutputFile << "<span class=\"func\" id=\"" << FuncName << "\">";
+          // auto *Func = Functions[CurSymbol->Idx];
+          // TODO: Mangle for HTML?
+          // std::string FuncName = Func->getQualifiedNameAsString();
+          auto Decl = Declarations[CurSymbol->Idx];
+          OutputFile << "<span class=\"decl\" id=\"" << Decl.Name << "\">";
         } else if (CurSymbol->Type == SymType::Reference) {
-          auto *Ref = References[CurSymbol->Idx];
-          auto FileName = clang::FullSourceLoc(Ref->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
-          auto RelativeFilename = FileName.substr(IDB->getProjectFolder().length());
-          std::string OutputFilename = OutputFolder + "/" + RelativeFilename.str() + ".html";
-
-          std::string SymName = Ref->getNameInfo().getAsString();
-          OutputFile << "<a href=\"" << OutputFilename << "#" << SymName << "\">";
+          auto Ref = References[CurSymbol->Idx];
+          std::string OutputFilename = OutputFolder + "/" + Ref.Filename + ".html";
+          OutputFile << "<a href=\"" << OutputFilename << "#" << Ref.Name << "\">";
         } else {
           ASSERT(false && "Not handled");
         }
@@ -105,7 +139,7 @@ void TUIndexer::generateHTML() {
     // XXX(1): Verify if we cannot fix the location/have something more accurate
     if (WritingSymbol) {
       if (*C == '.' || *C == '-' || *C == '\t' || *C == ' ' || *C == '('
-          || *C == ';') {
+          || *C == ')' || *C == ';') {
         if (CurSymbol->Type == SymType::Function) {
           OutputFile << "</span>";
         } else if (CurSymbol->Type == SymType::Reference) {
@@ -115,7 +149,6 @@ void TUIndexer::generateHTML() {
         }
         WritingSymbol = false;
         CurSymbol++;
-        DBG("Next symbol: " << CurSymbol->BLine << "," << CurSymbol->BColumn);
       }
     }
 
@@ -140,7 +173,6 @@ void TUIndexer::generateHTML() {
     // }
 
     if (*C == '\n') {
-      DBG("Line: " << Line);
       Line++;
       Column = 0; // will be set to 1 just after
     }
@@ -149,58 +181,9 @@ void TUIndexer::generateHTML() {
   }
 
   // TODO
-  // ASSERT(!WritingSymbol);
-  // ASSERT(CurSymbol == Symbols.end());
+  ASSERT(!WritingSymbol);
+  ASSERT(CurSymbol == Symbols.end());
 
-  OutputFile << "</pre></html>";
+  OutputFile << "</pre></body></html>";
   OutputFile.close();
 }
-
-void TUIndexer::dumpToDisk() {
-  // To be honest I have no clue if this will give any satisfying
-  // result but let's try
-  std::string RefsFilename = "/tmp/refs.sql";
-  std::ofstream OutputFile;
-  if (!std::filesystem::exists(RefsFilename)) {
-    OutputFile.open(RefsFilename);
-    OutputFile << "CREATE TABLE refs(STRING filename);\n";
-    OutputFile << "\n";
-  } else {
-    OutputFile.open(RefsFilename, std::ios_base::app);
-  }
-
-  for (auto *Ref : References) {
-    auto FileName = clang::FullSourceLoc(Ref->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
-    OutputFile << "INSERT INTO refs VALUES (";
-    OutputFile << "\"" << FileName.begin() << "\"";
-    OutputFile << ");\n";
-  }
-  OutputFile.close();
-}
-
-// This cannot work as we will use stuff that has been freed
-// We need to save on disk as we grow
-// void Indexer::generateDB() {
-//   std::ofstream OutputFile;
-//   OutputFile.open("/tmp/db.sql");
-
-//   OutputFile << "CREATE TABLE refs(STRING filename)\n";
-//   OutputFile << "\n";
-
-//   OutputFile << "INSERT INTO refs VALUES ";
-//   bool First = true;
-//   for (auto *Ref : References) {
-//     auto FileName = clang::FullSourceLoc(Ref->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
-//     if (!First) {
-//       OutputFile << ", ";
-//     }
-
-//     OutputFile << "(";
-//     OutputFile << "\"" << FileName.begin() << "\"";
-//     OutputFile << ")";
-//     First = false;
-//   }
-//   OutputFile << ";\n";
-
-//   OutputFile.close();
-// }

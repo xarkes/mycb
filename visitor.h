@@ -17,6 +17,7 @@ public:
   bool VisitFunctionDecl(clang::FunctionDecl *Decl);
   bool VisitVarDecl(clang::VarDecl *Decl);
   bool VisitDeclRefExpr(clang::DeclRefExpr *Expr);
+  bool VisitMemberExpr(clang::MemberExpr *Expr);
   void setIndexer(TUIndexer* TUI) {
     this->TUI = TUI;
   }

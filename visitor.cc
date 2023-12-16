@@ -16,10 +16,21 @@ bool IndexerVisitor::VisitVarDecl(clang::VarDecl *Decl) {
     // to return false
     return true;
   }
+  TUI->addVarDecl(Decl);
   return true;
 }
 
 bool IndexerVisitor::VisitDeclRefExpr(clang::DeclRefExpr *Expr) {
+  if (TUI->shouldIgnore(Expr)) {
+    // TODO: For performance purposes, we may want
+    // to return false
+    return true;
+  }
+  TUI->addReference(Expr);
+  return true;
+}
+
+bool IndexerVisitor::VisitMemberExpr(clang::MemberExpr *Expr) {
   if (TUI->shouldIgnore(Expr)) {
     // TODO: For performance purposes, we may want
     // to return false
@@ -54,5 +65,4 @@ void IndexerConsumer::HandleTranslationUnit(clang::ASTContext &Context) {
   Visitor.setIndexer(&TUI);
   Visitor.TraverseDecl(Context.getTranslationUnitDecl());
   TUI.generateHTML();
-  TUI.dumpToDisk();
 }
