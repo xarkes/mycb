@@ -1,6 +1,6 @@
 # MyCB
 
-MyCB is a C++ code browser base on Clang made as a side project
+MyCB is an experimental C++ code browser based on Clang made as a side project
 in order to understand the challenges of parsing C++ when it comes
 to having proper software to do C++ code review.
 
@@ -10,7 +10,6 @@ to having proper software to do C++ code review.
 - https://clang.llvm.org/docs/IntroductionToTheClangAST.html
 
 Useful command:
-
 ```
 clang -Xclang -ast-dump -fsyntax-only example.cc 
 ```

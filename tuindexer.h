@@ -37,14 +37,44 @@ struct SymDecl {
   std::string Name;
 };
 
+class FileAnnotations {
+private:
+  Indexer* IDB;
+public:
+  void addSymbol(Symbol Sym) {
+    if (Sym.Type == SymType::Function) {
+      Sym.Idx = Declarations.size();   
+    } else if (Sym.Type == SymType::Reference) {
+      Sym.Idx = References.size();
+    }
+    Symbols.emplace(Sym);
+  }
+  void addDecl(SymDecl Decl) { Declarations.emplace_back(Decl); }
+  void addRef(SymRef Ref) { References.emplace_back(Ref); }
+
+  void generateHTML(std::string OutputFolder, std::string OutputFilename, llvm::StringRef FileContent);
+
+private:
+  // Main data structures for our code references and such
+  std::vector<SymDecl> Declarations;
+  std::vector<SymRef> References;
+  std::set<Symbol> Symbols;
+};
+
 class TUIndexer {
 public:
-  TUIndexer(Indexer* IDB, clang::SourceManager *SM) : IDB(IDB), SM(SM), FID(SM->getMainFileID()) { }
-  
+  TUIndexer() { }
+
+  void initialize(Indexer* IDB, clang::SourceManager *SM) {
+    this->IDB = IDB;
+    this->SM = SM;
+  }
+
   void addFunctionDecl(clang::FunctionDecl *Decl);
   void addVarDecl(clang::VarDecl *Decl);
   void addReference(clang::DeclRefExpr*);
   void addReference(clang::MemberExpr*);
+  void addInclude(clang::SourceLocation HashLoc, clang::CharSourceRange FilenameRange, llvm::StringRef FileName);
 
   bool shouldIgnore(clang::Stmt* Stmt);
   bool shouldIgnore(clang::Decl* Decl);
@@ -53,13 +83,8 @@ public:
   void generateHTML();
 
 private:
-  Indexer* IDB;
-  clang::SourceManager* SM;
-  clang::FileID FID;
+  Indexer* IDB = nullptr;
+  clang::SourceManager* SM = nullptr;
 
-  // std::vector<clang::FunctionDecl*> Functions;
-  std::vector<SymDecl> Declarations;
-  // std::vector<clang::Expr*> References;
-  std::vector<SymRef> References;
-  std::set<Symbol> Symbols;
+  std::map<clang::FileID, FileAnnotations> Files;
 };

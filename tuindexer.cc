@@ -25,45 +25,63 @@ std::string formatRefName(clang::Expr *Expr) {
 void TUIndexer::addFunctionDecl(clang::FunctionDecl *Decl) {
   auto PLocBegin = SM->getPresumedLoc(Decl->getNameInfo().getBeginLoc());
   auto PLocEnd = SM->getPresumedLoc(Decl->getNameInfo().getEndLoc());
+  auto FID = PLocBegin.getFileID();
 
-  Symbols.emplace(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Function, (uint32_t) Declarations.size()});
+  Files[FID].addSymbol(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Function, 0});
   auto RefName = formatDeclName((clang::Decl*) Decl);
-  Declarations.emplace_back(SymDecl{RefName});
+  Files[FID].addDecl(SymDecl{RefName});
 }
 
 void TUIndexer::addVarDecl(clang::VarDecl *Decl) {
   auto PLocBegin = SM->getPresumedLoc(Decl->getLocation());
   auto PLocEnd = SM->getPresumedLoc(Decl->getSourceRange().getEnd());
+  auto FID = PLocBegin.getFileID();
 
-  Symbols.emplace(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Function, (uint32_t) Declarations.size()});
+  Files[FID].addSymbol(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Function, 0});
+
   auto RefName = formatDeclName((clang::Decl*) Decl);
-  Declarations.emplace_back(SymDecl{RefName});
+  Files[FID].addDecl(SymDecl{RefName});
 }
 
 void TUIndexer::addReference(clang::DeclRefExpr *Expr) {
   auto PLocBegin = SM->getPresumedLoc(Expr->getSourceRange().getBegin());
   auto PLocEnd = SM->getPresumedLoc(Expr->getSourceRange().getEnd());
-  Symbols.emplace(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Reference, (uint32_t) References.size()});
+  auto FID = PLocBegin.getFileID();
+  Files[FID].addSymbol(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Reference, 0});
 
-  auto FileName = clang::FullSourceLoc(Expr->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
+  auto FileName = clang::FullSourceLoc(Expr->getDecl()->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
   auto RelativeFilename = FileName.substr(IDB->getProjectFolder().length());
 
   auto Name = formatRefName((clang::Expr*) Expr);
   DBG("DeclRefExpr " << Name << ", " << std::string(RelativeFilename) << " at " << PLocBegin.getLine() << ", " << PLocBegin.getColumn());
-  References.emplace_back(SymRef{Name, std::string(RelativeFilename)});
+  Files[FID].addRef(SymRef{Name, std::string(RelativeFilename)});
 }
 
 void TUIndexer::addReference(clang::MemberExpr *Expr) {
   auto PLocBegin = SM->getPresumedLoc(Expr->getMemberLoc());
   auto PLocEnd = SM->getPresumedLoc(Expr->getMemberLoc());
-  Symbols.emplace(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Reference, (uint32_t) References.size()});
+  auto FID = PLocBegin.getFileID();
+  Files[FID].addSymbol(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Reference, 0});
 
   auto FileName = clang::FullSourceLoc(Expr->getMemberDecl()->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
   auto RelativeFilename = FileName.substr(IDB->getProjectFolder().length());
 
   auto Name = formatRefName((clang::Expr*) Expr);
   DBG("MemberExpr " << Name << ", " << std::string(RelativeFilename) << " at " << PLocBegin.getLine() << ", " << PLocBegin.getColumn());
-  References.emplace_back(SymRef{Name, std::string(RelativeFilename)});
+  Files[FID].addRef(SymRef{Name, std::string(RelativeFilename)});
+}
+
+void TUIndexer::addInclude(clang::SourceLocation HashLoc, clang::CharSourceRange FilenameRange, llvm::StringRef FileName) {
+  auto FID = SM->getFileID(HashLoc);
+  auto PLocBeginLine = SM->getPresumedLineNumber(HashLoc);
+  auto PLocBeginCol = SM->getPresumedColumnNumber(HashLoc);
+
+  auto LocBegin = SM->getFileOffset(FilenameRange.getBegin());
+  auto LocEnd = SM->getFileOffset(FilenameRange.getEnd());
+  auto Length = LocEnd - LocBegin;
+
+  Files[FID].addSymbol(Symbol{PLocBeginLine, PLocBeginCol, PLocBeginLine, PLocBeginCol + Length, SymType::Reference, 0});
+  Files[FID].addRef(SymRef{"", std::string(FileName)});
 }
 
 bool TUIndexer::shouldIgnore(clang::FileID FID) {
@@ -87,6 +105,7 @@ void TUIndexer::generateHTML() {
   std::filesystem::path OutFolder = "./out";
   std::string OutputFolder = std::filesystem::absolute(OutFolder);
 
+  auto FID = SM->getMainFileID();
   const clang::FileEntry *FE = SM->getFileEntryForID(FID);
   auto Filename = FE->getName();
   ASSERT(Filename.starts_with(IDB->getProjectFolder()));
@@ -101,10 +120,15 @@ void TUIndexer::generateHTML() {
   llvm::sys::fs::create_directories(OutDir, true, DefaultPerms);
 
   // Create output file
+  auto FileContent = SM->getBufferData(FID);
+  Files[FID].generateHTML(OutputFolder, OutputFilename, FileContent);
+  DBG("Files length: " << Files.size());
+}
+
+void FileAnnotations::generateHTML(std::string OutputFolder, std::string OutputFilename, llvm::StringRef FileContent) {
   std::ofstream OutputFile;
   OutputFile.open(OutputFilename);
 
-  auto FileContent = SM->getBufferData(FID);
   OutputFile << "<html><head><link rel=\"stylesheet\" href=\"res/style.css\"></head><body><pre>";
 
   const unsigned char* C = FileContent.bytes_begin();
