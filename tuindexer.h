@@ -74,7 +74,7 @@ public:
   void addVarDecl(clang::VarDecl *Decl);
   void addReference(clang::DeclRefExpr*);
   void addReference(clang::MemberExpr*);
-  void addInclude(clang::SourceLocation HashLoc, clang::CharSourceRange FilenameRange, llvm::StringRef FileName);
+  void addInclude(clang::SourceLocation HashLoc, clang::CharSourceRange FilenameRange, llvm::StringRef SearchPath, llvm::StringRef RelativePath);
 
   bool shouldIgnore(clang::Stmt* Stmt);
   bool shouldIgnore(clang::Decl* Decl);
@@ -83,8 +83,10 @@ public:
   void generateHTML();
 
 private:
+  std::string getRelativeFilename(clang::FileID FID);
+  std::string getRelativeFilename(std::string Filename);
+
   Indexer* IDB = nullptr;
   clang::SourceManager* SM = nullptr;
-
   std::map<clang::FileID, FileAnnotations> Files;
 };

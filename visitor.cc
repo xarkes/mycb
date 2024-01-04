@@ -1,14 +1,12 @@
 #include "visitor.h"
 
 void IndexerPPCallback::InclusionDirective(clang::SourceLocation HashLoc, const clang::Token& IncludeTok, llvm::StringRef FileName, bool IsAngled, clang::CharSourceRange FilenameRange, clang::OptionalFileEntryRef File, llvm::StringRef SearchPath, llvm::StringRef RelativePath, const clang::Module *Imported, clang::SrcMgr::CharacteristicKind) {
-  TUI->addInclude(HashLoc, FilenameRange, FileName);
+  TUI->addInclude(HashLoc, FilenameRange, SearchPath, RelativePath);
 }
 
 bool IndexerVisitor::VisitFunctionDecl(clang::FunctionDecl *Decl) {
   if (TUI->shouldIgnore(Decl)) {
-    // TODO: For performance purposes, we may want
-    // to return false
-    return true;
+    return false;
   }
   TUI->addFunctionDecl(Decl);
   return true;
@@ -16,9 +14,7 @@ bool IndexerVisitor::VisitFunctionDecl(clang::FunctionDecl *Decl) {
 
 bool IndexerVisitor::VisitVarDecl(clang::VarDecl *Decl) {
   if (TUI->shouldIgnore(Decl)) {
-    // TODO: For performance purposes, we may want
-    // to return false
-    return true;
+    return false;
   }
   TUI->addVarDecl(Decl);
   return true;
@@ -26,9 +22,7 @@ bool IndexerVisitor::VisitVarDecl(clang::VarDecl *Decl) {
 
 bool IndexerVisitor::VisitDeclRefExpr(clang::DeclRefExpr *Expr) {
   if (TUI->shouldIgnore(Expr)) {
-    // TODO: For performance purposes, we may want
-    // to return false
-    return true;
+    return false;
   }
   TUI->addReference(Expr);
   return true;
@@ -36,17 +30,11 @@ bool IndexerVisitor::VisitDeclRefExpr(clang::DeclRefExpr *Expr) {
 
 bool IndexerVisitor::VisitMemberExpr(clang::MemberExpr *Expr) {
   if (TUI->shouldIgnore(Expr)) {
-    // TODO: For performance purposes, we may want
-    // to return false
-    return true;
+    return false;
   }
   TUI->addReference(Expr);
   return true;
 }
-
-// void setIndexer(Indexer* IndexerDB) {
-//   this->IndexerDB = IndexerDB;
-// }
 
 void IndexerConsumer::Initialize(clang::ASTContext &Context) {
   TUI.initialize(IndexerDB, &Context.getSourceManager());
@@ -61,15 +49,12 @@ void IndexerConsumer::HandleTranslationUnit(clang::ASTContext &Context) {
   auto FID = SM.getMainFileID();
   const clang::FileEntry *FE = SM.getFileEntryForID(FID);
   auto CurFilename = FE->getName();
-  // std::cerr << "FID: " << Context.getSourceManager().getMainFileID().getHashValue() << std::endl;
-  // std::cerr << "Filename: " << CurFilename.begin() << std::endl;
   if (CurFilename.rfind(IndexerDB->getProjectFolder()) != 0) {
     std::cerr << "Skipping file " << CurFilename.begin() << " as it is not in the project folder" << std::endl;
     return;
   }
 
   IndexerDB->registerFile(FID);
-  DBG("TUI Initialized: " << &SM);
   Visitor.setIndexer(&TUI);
   Visitor.TraverseDecl(Context.getTranslationUnitDecl());
   TUI.generateHTML();

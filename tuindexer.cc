@@ -25,6 +25,9 @@ std::string formatRefName(clang::Expr *Expr) {
 void TUIndexer::addFunctionDecl(clang::FunctionDecl *Decl) {
   auto PLocBegin = SM->getPresumedLoc(Decl->getNameInfo().getBeginLoc());
   auto PLocEnd = SM->getPresumedLoc(Decl->getNameInfo().getEndLoc());
+  if (PLocBegin.isInvalid()) {
+    return;
+  }
   auto FID = PLocBegin.getFileID();
 
   Files[FID].addSymbol(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Function, 0});
@@ -35,6 +38,9 @@ void TUIndexer::addFunctionDecl(clang::FunctionDecl *Decl) {
 void TUIndexer::addVarDecl(clang::VarDecl *Decl) {
   auto PLocBegin = SM->getPresumedLoc(Decl->getLocation());
   auto PLocEnd = SM->getPresumedLoc(Decl->getSourceRange().getEnd());
+  if (PLocBegin.isInvalid()) {
+    return;
+  }
   auto FID = PLocBegin.getFileID();
 
   Files[FID].addSymbol(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Function, 0});
@@ -46,32 +52,36 @@ void TUIndexer::addVarDecl(clang::VarDecl *Decl) {
 void TUIndexer::addReference(clang::DeclRefExpr *Expr) {
   auto PLocBegin = SM->getPresumedLoc(Expr->getSourceRange().getBegin());
   auto PLocEnd = SM->getPresumedLoc(Expr->getSourceRange().getEnd());
+  if (PLocBegin.isInvalid()) {
+    return;
+  }
   auto FID = PLocBegin.getFileID();
   Files[FID].addSymbol(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Reference, 0});
 
-  auto FileName = clang::FullSourceLoc(Expr->getDecl()->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
-  auto RelativeFilename = FileName.substr(IDB->getProjectFolder().length());
+  auto TargetFID = clang::FullSourceLoc(Expr->getDecl()->getBeginLoc(), *SM).getExpansionLoc().getFileID();
+  auto RelativeFilename = getRelativeFilename(TargetFID);
 
   auto Name = formatRefName((clang::Expr*) Expr);
-  DBG("DeclRefExpr " << Name << ", " << std::string(RelativeFilename) << " at " << PLocBegin.getLine() << ", " << PLocBegin.getColumn());
   Files[FID].addRef(SymRef{Name, std::string(RelativeFilename)});
 }
 
 void TUIndexer::addReference(clang::MemberExpr *Expr) {
   auto PLocBegin = SM->getPresumedLoc(Expr->getMemberLoc());
   auto PLocEnd = SM->getPresumedLoc(Expr->getMemberLoc());
+  if (PLocBegin.isInvalid()) {
+    return;
+  }
   auto FID = PLocBegin.getFileID();
   Files[FID].addSymbol(Symbol{PLocBegin.getLine(), PLocBegin.getColumn(), PLocEnd.getLine(), PLocEnd.getColumn(), SymType::Reference, 0});
 
-  auto FileName = clang::FullSourceLoc(Expr->getMemberDecl()->getBeginLoc(), *SM).getExpansionLoc().getFileEntry()->getName();
-  auto RelativeFilename = FileName.substr(IDB->getProjectFolder().length());
+  auto TargetFID = clang::FullSourceLoc(Expr->getMemberDecl()->getBeginLoc(), *SM).getExpansionLoc().getFileID();
+  auto RelativeFilename = getRelativeFilename(TargetFID);
 
   auto Name = formatRefName((clang::Expr*) Expr);
-  DBG("MemberExpr " << Name << ", " << std::string(RelativeFilename) << " at " << PLocBegin.getLine() << ", " << PLocBegin.getColumn());
   Files[FID].addRef(SymRef{Name, std::string(RelativeFilename)});
 }
 
-void TUIndexer::addInclude(clang::SourceLocation HashLoc, clang::CharSourceRange FilenameRange, llvm::StringRef FileName) {
+void TUIndexer::addInclude(clang::SourceLocation HashLoc, clang::CharSourceRange FilenameRange, llvm::StringRef SearchPath, llvm::StringRef RelativePath) {
   auto FID = SM->getFileID(HashLoc);
   auto PLocBeginLine = SM->getPresumedLineNumber(HashLoc);
   auto PLocBeginCol = SM->getPresumedColumnNumber(HashLoc);
@@ -81,14 +91,17 @@ void TUIndexer::addInclude(clang::SourceLocation HashLoc, clang::CharSourceRange
   auto Length = LocEnd - LocBegin;
 
   Files[FID].addSymbol(Symbol{PLocBeginLine, PLocBeginCol, PLocBeginLine, PLocBeginCol + Length, SymType::Reference, 0});
-  Files[FID].addRef(SymRef{"", std::string(FileName)});
+  auto Fullpath = std::filesystem::path(std::string(SearchPath)) / std::filesystem::path(std::string(RelativePath));
+  auto RelPath = getRelativeFilename(Fullpath);
+  Files[FID].addRef(SymRef{"", RelPath});
 }
 
 bool TUIndexer::shouldIgnore(clang::FileID FID) {
-  if (std::find(IDB->getRegisteredFiles().begin(), IDB->getRegisteredFiles().end(), FID) != IDB->getRegisteredFiles().end()) {
-    return false;
-  }
-  return true;
+  return !std::filesystem::exists(SM->getNonBuiltinFilenameForID(FID)->begin());
+  // if (std::find(IDB->getRegisteredFiles().begin(), IDB->getRegisteredFiles().end(), FID) != IDB->getRegisteredFiles().end()) {
+  //   return false;
+  // }
+  // return true;
 }
 
 bool TUIndexer::shouldIgnore(clang::Decl* Decl) {
@@ -101,28 +114,60 @@ bool TUIndexer::shouldIgnore(clang::Stmt* Stmt) {
   return shouldIgnore(FID);
 }
 
+std::string TUIndexer::getRelativeFilename(clang::FileID FID) {
+  const clang::FileEntry *FE = SM->getFileEntryForID(FID);
+  if (!FE) {
+    DBG("No FileEntry, skipping...");
+    return std::string();
+  }
+  auto Filename = FE->getName();
+  if (Filename.empty()) {
+    DBG("Empty filename...");
+    return std::string();
+  }
+  return getRelativeFilename(Filename.str());
+}
+
+std::string TUIndexer::getRelativeFilename(std::string Filename) {
+  auto CanonicalFn = std::filesystem::canonical(Filename);
+  std::string Fullname;
+  if (std::string(CanonicalFn).rfind(IDB->getProjectFolder()) == 0) {
+    // First case: The file is part of the project, so use the relative filename
+    Fullname = std::string(CanonicalFn).substr(IDB->getProjectFolder().length() + 1);
+  } else {
+    // Second case: The file is not part of the projectv (eg. system header?)
+    // so use its full path
+    // TODO: Not portable for Windows
+    Fullname = std::string(CanonicalFn).substr(1);
+  }
+  return Fullname;
+}
+
 void TUIndexer::generateHTML() {
   std::filesystem::path OutFolder = "./out";
-  std::string OutputFolder = std::filesystem::absolute(OutFolder);
+  std::filesystem::path OutputFolder = std::filesystem::absolute(OutFolder);
+  
+  // Create output files
+  for (auto File : Files) {
+    auto FID = File.first;
+    auto Path = getRelativeFilename(FID);
+    if (Path.empty()) {
+      continue;
+    }
+    auto HtmlFile = std::string(Path).append(".html");
+    auto OutputFilename = OutputFolder / HtmlFile;
+    if (!std::filesystem::exists(OutputFilename)) {
+      // Force create parent folders
+      using namespace llvm::sys::fs;
+      auto DefaultPerms = perms::all_all & ~perms::group_write & ~perms::others_write;
+      auto OutDir = std::string(OutputFilename.parent_path());
+      llvm::sys::fs::create_directories(OutDir, true, DefaultPerms);
 
-  auto FID = SM->getMainFileID();
-  const clang::FileEntry *FE = SM->getFileEntryForID(FID);
-  auto Filename = FE->getName();
-  ASSERT(Filename.starts_with(IDB->getProjectFolder()));
-  auto RelativeFilename = Filename.substr(IDB->getProjectFolder().length());
-
-  std::string OutputFilename = OutputFolder + "/" + RelativeFilename.str() + ".html";
-  auto OutDir = llvm::StringRef(OutputFilename).rsplit('/').first;
-
-  // Force create parent folders
-  using namespace llvm::sys::fs;
-  auto DefaultPerms = perms::all_all & ~perms::group_write & ~perms::others_write;
-  llvm::sys::fs::create_directories(OutDir, true, DefaultPerms);
-
-  // Create output file
-  auto FileContent = SM->getBufferData(FID);
-  Files[FID].generateHTML(OutputFolder, OutputFilename, FileContent);
-  DBG("Files length: " << Files.size());
+      // Generate file
+      auto FileContent = SM->getBufferData(FID);
+      Files[FID].generateHTML(OutputFolder, OutputFilename, FileContent);
+    }
+  }
 }
 
 void FileAnnotations::generateHTML(std::string OutputFolder, std::string OutputFilename, llvm::StringRef FileContent) {
@@ -206,7 +251,7 @@ void FileAnnotations::generateHTML(std::string OutputFolder, std::string OutputF
 
   // TODO
   ASSERT(!WritingSymbol);
-  ASSERT(CurSymbol == Symbols.end());
+  // ASSERT(CurSymbol == Symbols.end());
 
   OutputFile << "</pre></body></html>";
   OutputFile.close();
