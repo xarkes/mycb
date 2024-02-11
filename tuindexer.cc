@@ -135,7 +135,7 @@ std::string TUIndexer::getRelativeFilename(std::string Filename) {
     // First case: The file is part of the project, so use the relative filename
     Fullname = std::string(CanonicalFn).substr(IDB->getProjectFolder().length() + 1);
   } else {
-    // Second case: The file is not part of the projectv (eg. system header?)
+    // Second case: The file is not part of the project (eg. system header?)
     // so use its full path
     // TODO: Not portable for Windows
     Fullname = std::string(CanonicalFn).substr(1);
